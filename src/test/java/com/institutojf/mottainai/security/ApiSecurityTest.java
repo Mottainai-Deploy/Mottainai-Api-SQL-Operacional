@@ -44,14 +44,58 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @WebMvcTest({ ApiSecurityTest.SecurityTestController.class, ApiSecurityTest.CatalogSecurityTestController.class,
         ApiSecurityTest.InventoryCountSecurityTestController.class,
         ApiSecurityTest.DamageSecurityTestController.class,
-        EmployeeController.class })
+        EmployeeController.class, com.institutojf.mottainai.controller.AuthenticationController.class })
 @Import({ SecurityConfig.class, DatabaseUserDetailsService.class, ApiSecurityTest.SecurityTestController.class,
         ApiSecurityTest.CatalogSecurityTestController.class, ApiSecurityTest.InventoryCountSecurityTestController.class,
         ApiSecurityTest.DamageSecurityTestController.class })
 @TestPropertySource(properties = { "security.jwt.secret=MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTIzNDU2Nzg5MDE=",
         "security.jwt.issuer=https://mottainai.local", "security.jwt.expiration-minutes=60",
-        "security.cors.allowed-origins=https://app.example" })
+        "security.cors.allowed-origins=https://app.example", "security.firebase.project-id=mottainai-operacional" })
 class ApiSecurityTest {
+
+    @MockitoBean(name = "firebaseJwtDecoder")
+    private org.springframework.security.oauth2.jwt.JwtDecoder firebaseDecoder;
+
+    @Test
+    void directFirebaseBearerUsesSqlAuthoritiesWithoutAnExchangeOrSession() throws Exception {
+        String bearer = firebaseBearer();
+        var token = org.springframework.security.oauth2.jwt.Jwt.withTokenValue(bearer).header("alg", "RS256")
+                .subject("firebase-uid").issuer("https://securetoken.google.com/mottainai-operacional").build();
+        when(firebaseDecoder.decode(bearer)).thenReturn(token);
+        when(firebaseStaff.authenticate(token)).thenReturn(new org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken(
+                token, List.of(new org.springframework.security.core.authority.SimpleGrantedAuthority("ROLE_OPERATOR"))));
+        mockMvc.perform(get("/api/v1/security-probe").header("Authorization", "Bearer " + bearer))
+                .andExpect(status().isOk());
+        mockMvc.perform(post("/api/v1/security-probe").header("Authorization", "Bearer " + bearer))
+                .andExpect(status().isForbidden());
+        verifyNoInteractions(authenticationService);
+        verify(rlsContextService, org.mockito.Mockito.never()).validateAccessToken(org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    void rejectsInvalidFirebaseSignatureAndUnlinkedOperationalAccount() throws Exception {
+        String bearer = firebaseBearer();
+        when(firebaseDecoder.decode(bearer)).thenThrow(new org.springframework.security.oauth2.jwt.BadJwtException("Invalid signature"));
+        mockMvc.perform(get("/api/v1/security-probe").header("Authorization", "Bearer " + bearer))
+                .andExpect(status().isUnauthorized());
+        var token = org.springframework.security.oauth2.jwt.Jwt.withTokenValue(bearer).header("alg", "RS256")
+                .subject("unlinked-uid").issuer("https://securetoken.google.com/mottainai-operacional").build();
+        org.mockito.Mockito.doReturn(token).when(firebaseDecoder).decode(bearer);
+        when(firebaseStaff.authenticate(token)).thenThrow(new org.springframework.security.authentication.BadCredentialsException("Unlinked account"));
+        mockMvc.perform(get("/api/v1/security-probe").header("Authorization", "Bearer " + bearer))
+                .andExpect(status().isUnauthorized());
+    }
+
+    // Decoder is mocked: this tests routing through the bearer filter/provider, not Google's signature service.
+    private String firebaseBearer() {
+        var encoder = java.util.Base64.getUrlEncoder().withoutPadding();
+        return encoder.encodeToString("{\"alg\":\"RS256\"}".getBytes(java.nio.charset.StandardCharsets.UTF_8)) + "."
+                + encoder.encodeToString("{\"iss\":\"https://securetoken.google.com/mottainai-operacional\",\"sub\":\"firebase-uid\"}"
+                    .getBytes(java.nio.charset.StandardCharsets.UTF_8)) + ".c2ln";
+    }
+
+    @MockitoBean
+    private com.institutojf.mottainai.service.FirebaseStaffAuthenticationService firebaseStaff;
 
     @Autowired
     private MockMvc mockMvc;
@@ -70,6 +114,44 @@ class ApiSecurityTest {
 
     @MockitoBean
     private CustomerAuthRepository customerAuthRepository;
+
+    @MockitoBean
+    private com.institutojf.mottainai.service.AuthenticationService authenticationService;
+
+    @MockitoBean
+    private com.institutojf.mottainai.service.UserProfileService userProfileService;
+
+    @MockitoBean
+    private com.institutojf.mottainai.service.MobileProfileService mobileProfileService;
+
+    @Test
+    void firebaseExchangeIsPublicButStillCallsIdentityValidation() throws Exception {
+        when(authenticationService.firebaseSession(org.mockito.ArgumentMatchers.any())).thenReturn(
+                new com.institutojf.mottainai.dto.response.TokenResponse("access", "refresh", "Bearer", 3600, 604800));
+        mockMvc.perform(post("/api/v1/auth/firebase")
+                .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+                .content("{\"firebaseIdToken\":\"firebase-token-to-verify\"}"))
+                .andExpect(status().isOk());
+        verify(authenticationService).firebaseSession(org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    void mobileProfileRequiresStaffAuthentication() throws Exception {
+        mockMvc.perform(get("/api/v1/auth/mobile-profile")).andExpect(status().isUnauthorized());
+        mockMvc.perform(get("/api/v1/auth/mobile-profile").with(user("customer").roles("CUSTOMER")))
+                .andExpect(status().isForbidden());
+        verifyNoInteractions(mobileProfileService);
+    }
+
+    @Test
+    void firebaseExchangeRejectsInvalidIdentity() throws Exception {
+        when(authenticationService.firebaseSession(org.mockito.ArgumentMatchers.any()))
+                .thenThrow(new org.springframework.security.authentication.BadCredentialsException("Invalid identity"));
+        mockMvc.perform(post("/api/v1/auth/firebase")
+                .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+                .content("{\"firebaseIdToken\":\"invalid-token\"}"))
+                .andExpect(status().isUnauthorized());
+    }
 
     @Test
     @DisplayName("Should reject unauthenticated API request")
