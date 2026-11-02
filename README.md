@@ -595,3 +595,7 @@ flowchart LR
 <sub>Parte do ecossistema <a href="https://github.com/Mottainai-One">Mottainai-One</a></sub>
 
 </div>
+
+## CI/CD
+
+The GitHub Actions workflow in `.github/workflows/ci.yml` runs for pull requests targeting `main` or `master` and for pushes to those branches. It builds and verifies the Maven project, checks commit conventions and repository hygiene, and runs the configured code, migration, dependency, and API documentation checks. Some advisory jobs are configured with `continue-on-error`; required checks are enforced by their workflow status.
