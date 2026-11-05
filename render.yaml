@@ -1,0 +1,29 @@
+services:
+  - type: web
+    name: mottainai-operational-api
+    runtime: docker
+    plan: free
+    autoDeployTrigger: "off"
+    envVars:
+      - key: SERVER_PORT
+        value: "10000"
+      - key: DB_URL
+        sync: false
+      - key: DB_USER
+        sync: false
+      - key: DB_PASSWORD
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: FIREBASE_PROJECT_ID
+        sync: false
+      - key: STAFF_DATA_ENCRYPTION_KEY
+        sync: false
+      - key: STAFF_DATA_KEY_VERSION
+        sync: false
+      - key: STAFF_DATA_LOOKUP_KEY
+        sync: false
+      - key: CUSTOMER_DATA_ENCRYPTION_KEY
+        sync: false
+      - key: CUSTOMER_DATA_KEY_VERSION
+        sync: false
