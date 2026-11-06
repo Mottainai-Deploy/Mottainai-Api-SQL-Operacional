@@ -27,3 +27,7 @@ services:
         sync: false
       - key: CUSTOMER_DATA_KEY_VERSION
         sync: false
+      - key: STAFF_DATA_DECRYPTION_KEYS
+        sync: false
+      - key: CUSTOMER_DATA_DECRYPTION_KEYS
+        sync: false
